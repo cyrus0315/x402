@@ -8,11 +8,11 @@ dotenv.config({ path: '../.env' });
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   
-  // Enable CORS
+  // Enable CORS - 允许所有来源（Hackathon 演示用）
   app.enableCors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: true, // 允许所有来源
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-payment'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-payment', 'x-wallet-address'],
     credentials: true,
   });
   
