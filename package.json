@@ -1,0 +1,20 @@
+{
+  "name": "payperinsight",
+  "version": "1.0.0",
+  "description": "Decentralized AI knowledge marketplace powered by x402 + Monad",
+  "private": true,
+  "scripts": {
+    "install:all": "pnpm install && cd backend && pnpm install && cd ../frontend && pnpm install && cd ../contracts && pnpm install",
+    "backend:dev": "cd backend && pnpm start:dev",
+    "frontend:dev": "cd frontend && pnpm dev",
+    "contracts:compile": "cd contracts && pnpm compile",
+    "contracts:test": "cd contracts && pnpm test",
+    "contracts:deploy": "cd contracts && pnpm deploy:monad",
+    "dev": "concurrently \"pnpm backend:dev\" \"pnpm frontend:dev\"",
+    "build": "cd frontend && pnpm build"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
+
