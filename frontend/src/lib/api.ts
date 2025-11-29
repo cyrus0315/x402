@@ -1,4 +1,5 @@
-const API_BASE = '/api'
+// Railway 部署时使用完整的后端 URL，本地开发用 /api（Vite 代理）
+const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
 export interface Content {
   id: string
