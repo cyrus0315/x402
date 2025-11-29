@@ -117,6 +117,7 @@ function withdraw() external;
 
 ## 📚 文档
 
+- [🚀 启动与部署指南](./docs/GETTING_STARTED.md) - 从零开始运行项目
 - [📐 架构文档](./docs/ARCHITECTURE.md) - 详细的系统架构和技术实现
 - [🎯 演示指南](./docs/DEMO_GUIDE.md) - 黑客松演示快速参考
 

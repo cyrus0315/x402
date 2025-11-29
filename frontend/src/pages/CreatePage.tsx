@@ -5,6 +5,9 @@ import { Plus, X, Sparkles, AlertCircle } from 'lucide-react'
 import { useWalletStore } from '../store/wallet'
 import { createContent } from '../lib/api'
 import { toast } from '../components/ui/Toaster'
+import { createContentOnChain } from '../lib/contract'
+import { ethers } from 'ethers'
+import { CURRENT_NETWORK } from '../lib/config'
 
 const categories = [
   { id: 'trading', name: 'Trading', icon: '📈' },
@@ -63,25 +66,51 @@ export default function CreatePage() {
 
     setIsSubmitting(true)
     try {
-      const basePriceWei = (parseFloat(form.basePrice) * 1e18).toString()
+      const basePriceWei = ethers.parseEther(form.basePrice)
       
+      // 生成 metadataURI (实际项目中应该上传到 IPFS)
+      const metadataURI = `ipfs://Qm${Date.now().toString(16)}${form.title.slice(0, 10)}`
+
+      console.log('📝 Creating content on chain...')
+      console.log(`💰 Price: ${form.basePrice} ${CURRENT_NETWORK.currency.symbol}`)
+
+      // 1. 先在链上创建内容
+      const chainResult = await createContentOnChain(basePriceWei, metadataURI)
+      
+      console.log('✅ On-chain content created!')
+      console.log(`📄 Content ID: ${chainResult.contentId}`)
+      console.log(`📜 TX Hash: ${chainResult.transactionHash}`)
+
+      // 2. 然后保存到后端
       const content = await createContent({
         title: form.title,
         description: form.description,
         category: form.category,
         preview: form.preview,
         fullContent: form.fullContent,
-        basePrice: basePriceWei,
-        priceUsd: `$${(parseFloat(form.basePrice) * 10).toFixed(2)}`, // Assuming 1 MON = $10
+        basePrice: basePriceWei.toString(),
+        priceUsd: `$${(parseFloat(form.basePrice) * 10).toFixed(2)}`,
         creatorName: form.creatorName || 'Anonymous',
         tags: form.tags,
         imageUrl: form.imageUrl,
+        metadataURI: metadataURI,
+        contentId: chainResult.contentId, // 使用链上的 contentId
       }, address)
 
-      toast({ type: 'success', title: 'Content created successfully!' })
+      toast({ 
+        type: 'success', 
+        title: 'Content created successfully!',
+        message: `Content ID: ${chainResult.contentId}`
+      })
       navigate(`/content/${content.id}`)
-    } catch (error) {
-      toast({ type: 'error', title: 'Failed to create content' })
+    } catch (error: any) {
+      console.error('❌ Create failed:', error)
+      
+      if (error.code === 'ACTION_REJECTED' || error.code === 4001) {
+        toast({ type: 'error', title: 'Transaction cancelled' })
+      } else {
+        toast({ type: 'error', title: 'Failed to create content', message: error.message })
+      }
     } finally {
       setIsSubmitting(false)
     }

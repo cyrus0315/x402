@@ -195,9 +195,16 @@ async function checkArbitrage(tokenA, tokenB) {
 
   create(dto: CreateContentDto, creator: string): Content {
     const id = uuidv4();
+    // 如果传入了链上的 contentId，使用它；否则自动递增
+    const contentId = dto.contentId ?? this.contentIdCounter++;
+    // 确保 counter 始终大于已使用的最大 ID
+    if (dto.contentId && dto.contentId >= this.contentIdCounter) {
+      this.contentIdCounter = dto.contentId + 1;
+    }
+    
     const content: Content = {
       id,
-      contentId: this.contentIdCounter++,
+      contentId,
       title: dto.title,
       description: dto.description,
       category: dto.category,

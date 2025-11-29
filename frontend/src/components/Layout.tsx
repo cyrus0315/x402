@@ -1,8 +1,9 @@
 import { Link, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Sparkles, Plus, User, Wallet, LogOut } from 'lucide-react'
+import { Sparkles, User, Wallet, LogOut } from 'lucide-react'
 import { useWalletStore } from '../store/wallet'
 import { formatAddress } from '../lib/utils'
+import { CURRENT_NETWORK, NETWORK } from '../lib/config'
 
 interface LayoutProps {
   children: React.ReactNode
@@ -47,12 +48,22 @@ export default function Layout({ children }: LayoutProps) {
 
             {/* Wallet */}
             <div className="flex items-center gap-3">
+              {/* Network indicator */}
+              <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${
+                NETWORK === 'local' 
+                  ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' 
+                  : 'bg-green-500/20 text-green-400 border border-green-500/30'
+              }`}>
+                <div className={`w-1.5 h-1.5 rounded-full ${NETWORK === 'local' ? 'bg-yellow-400' : 'bg-green-400'} animate-pulse`} />
+                {CURRENT_NETWORK.name}
+              </div>
+
               {address ? (
                 <div className="flex items-center gap-3">
                   {/* Balance */}
                   <div className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/50">
                     <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                    <span className="text-sm font-mono">{balance} MON</span>
+                    <span className="text-sm font-mono">{balance} {CURRENT_NETWORK.currency.symbol}</span>
                   </div>
                   
                   {/* Address dropdown */}

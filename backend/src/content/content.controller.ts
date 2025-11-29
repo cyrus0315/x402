@@ -8,16 +8,21 @@ import {
   Headers,
   HttpException,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import { ContentService, Content } from './content.service';
 import { PaymentService } from '../payment/payment.service';
+import { UserService } from '../user/user.service';
 import { CreateContentDto } from './dto/create-content.dto';
 
 @Controller('api/content')
 export class ContentController {
+  private readonly logger = new Logger(ContentController.name);
+
   constructor(
     private readonly contentService: ContentService,
     private readonly paymentService: PaymentService,
+    private readonly userService: UserService,
   ) {}
 
   /**
@@ -56,6 +61,13 @@ export class ContentController {
 
   /**
    * 获取完整内容（需要 x402 支付）
+   * 
+   * x402 流程：
+   * 1. 客户端请求内容（无 payment header）
+   * 2. 服务端返回 HTTP 402 + 支付信息
+   * 3. 客户端完成支付
+   * 4. 客户端带 payment header 重新请求
+   * 5. 服务端验证并返回内容
    */
   @Get(':id')
   async getFullContent(
@@ -64,10 +76,14 @@ export class ContentController {
     @Headers('x-wallet-address') walletAddress: string,
   ) {
     const content = this.contentService.findOne(id);
+    // 使用后端计算的动态价格（与链上保持一致的算法）
     const currentPrice = this.calculateDynamicPrice(content.basePrice, content.unlockCount);
 
-    // 如果没有 payment header，返回 402 要求支付
+    // ============ x402 Step 2: 返回 402 要求支付 ============
     if (!paymentHeader) {
+      this.logger.log(`[x402] 402 Payment Required for content ${content.contentId}`);
+      this.logger.log(`[x402] Price: ${currentPrice} wei`);
+      
       throw new HttpException(
         {
           statusCode: HttpStatus.PAYMENT_REQUIRED,
@@ -75,7 +91,11 @@ export class ContentController {
           price: currentPrice,
           priceUsd: content.priceUsd,
           contentId: content.contentId,
-          payTo: process.env.RECIPIENT_WALLET,
+          payTo: process.env.RECIPIENT_WALLET || content.creator,
+          // x402 标准 headers
+          'x-payment-required': true,
+          'x-payment-network': process.env.NETWORK || 'monad-testnet',
+          'x-payment-chain-id': process.env.CHAIN_ID || '10143',
         },
         HttpStatus.PAYMENT_REQUIRED,
       );
@@ -101,13 +121,32 @@ export class ContentController {
         );
       }
 
-      // 支付成功，增加解锁计数
+      // ============ x402 Step 5: 支付验证成功 ============
+      this.logger.log(`[x402] Payment verified for content ${content.contentId}`);
+      this.logger.log(`[x402] TX: ${paymentResult.transactionHash || paymentHeader}`);
+      
+      // 增加解锁计数
       this.contentService.incrementUnlockCount(id);
+      const updatedContent = this.contentService.findOne(id);
+      const newPrice = this.calculateDynamicPrice(updatedContent.basePrice, updatedContent.unlockCount);
+      
+      this.logger.log(`[x402] Unlock count: ${content.unlockCount} → ${updatedContent.unlockCount}`);
+      this.logger.log(`[x402] Price updated: ${currentPrice} → ${newPrice} wei`);
+
+      // 记录用户解锁（使用链上 contentId）
+      if (walletAddress) {
+        this.userService.recordUnlock(
+          walletAddress,
+          content.contentId.toString(),
+          paymentResult.transactionHash || paymentHeader,
+          currentPrice,
+        );
+      }
 
       // 返回完整内容
       return {
-        ...content,
-        currentPrice,
+        ...updatedContent,
+        currentPrice: newPrice,
         transactionHash: paymentResult.transactionHash,
         unlocked: true,
       };
@@ -140,7 +179,12 @@ export class ContentController {
         HttpStatus.BAD_REQUEST,
       );
     }
-    return this.contentService.create(createContentDto, creator);
+    const content = this.contentService.create(createContentDto, creator);
+    
+    // 记录用户创建的内容
+    this.userService.recordCreation(creator, content.contentId.toString());
+    
+    return content;
   }
 
   /**

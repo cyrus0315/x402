@@ -9,15 +9,16 @@ import {
   Users,
   Clock,
   ArrowLeft,
-  Copy,
   Check,
   ExternalLink,
   Sparkles,
 } from 'lucide-react'
-import { fetchContentPreview, Content } from '../lib/api'
+import { fetchContentPreview, fetchContentFull, Content, PaymentRequiredError } from '../lib/api'
 import { useWalletStore } from '../store/wallet'
 import { formatPrice, formatAddress, formatTimeAgo } from '../lib/utils'
 import { toast } from '../components/ui/Toaster'
+import { unlockContent, checkUserAccess } from '../lib/contract'
+import { CURRENT_NETWORK } from '../lib/config'
 
 export default function ContentPage() {
   const { id } = useParams<{ id: string }>()
@@ -30,13 +31,40 @@ export default function ContentPage() {
 
   useEffect(() => {
     if (id) loadContent()
-  }, [id])
+  }, [id, address])
 
   async function loadContent() {
     setIsLoading(true)
     try {
       const data = await fetchContentPreview(id!)
       setContent(data)
+      
+      // 如果用户已连接钱包，检查链上是否已解锁
+      if (address && data.contentId) {
+        try {
+          const hasAccess = await checkUserAccess(data.contentId, address)
+          if (hasAccess) {
+            console.log('✅ User has already unlocked this content on-chain')
+            setIsUnlocked(true)
+            
+            // 尝试从后端获取完整内容
+            try {
+              const fullContent = await fetchContentFull(id!, 'chain-verified', address)
+              setContent(fullContent)
+            } catch {
+              // 如果后端获取失败，显示链上验证消息
+              setContent({
+                ...data,
+                fullContent: `# ${data.title}\n\n## ✅ Already Unlocked!\n\nYou have already unlocked this content. Your access NFT is stored on-chain.\n\n${data.preview}\n\n---\n\n*Full content verified via blockchain.*`,
+                unlocked: true,
+              })
+            }
+          }
+        } catch (err) {
+          console.log('Could not check on-chain access:', err)
+          // 链上检查失败不阻止页面加载
+        }
+      }
     } catch (error) {
       console.error('Failed to load content:', error)
       toast({ type: 'error', title: 'Failed to load content' })
@@ -55,51 +83,84 @@ export default function ContentPage() {
 
     setIsUnlocking(true)
     try {
-      // For demo: simulate payment
-      // In production, this would use thirdweb x402 SDK
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      console.log('🔓 Starting x402 unlock process...')
+      console.log(`📄 Content ID: ${content.contentId}`)
 
-      // Mock successful unlock
-      setIsUnlocked(true)
-      setContent({
-        ...content,
-        fullContent: `# ${content.title}
+      // ============ STEP 1: 请求后端，触发 402 ============
+      console.log('📡 Step 1: Requesting content from backend...')
+      
+      try {
+        // 尝试不带 payment header 获取内容
+        const fullContent = await fetchContentFull(id!, '', address)
+        // 如果成功了（不应该），说明已经解锁了
+        setContent(fullContent)
+        setIsUnlocked(true)
+        toast({ type: 'success', title: 'Content already unlocked!' })
+        return
+      } catch (error) {
+        // 期望收到 402 错误
+        if (!(error instanceof PaymentRequiredError)) {
+          throw error
+        }
 
-This is the full unlocked content! 🎉
+        // ============ STEP 2: 收到 402，获取支付信息 ============
+        console.log('💰 Step 2: Received 402 Payment Required')
+        console.log(`   Price: ${error.price} wei`)
+        console.log(`   Pay to: ${error.payTo}`)
+        console.log(`   Content ID: ${error.contentId}`)
 
-${content.preview}
+        toast({
+          type: 'info',
+          title: 'Payment Required',
+          message: `Price: ${formatPrice(error.price)}`,
+        })
 
-## Deep Dive
+        // ============ STEP 3: 发起链上支付 ============
+        console.log('⛓️ Step 3: Initiating on-chain payment...')
+        
+        const urlParams = new URLSearchParams(window.location.search)
+        const referrer = urlParams.get('ref') || '0x0000000000000000000000000000000000000000'
 
-Here's the complete premium content that was previously locked...
+        const result = await unlockContent(error.contentId, referrer)
+        
+        console.log('✅ Payment successful!')
+        console.log(`   TX Hash: ${result.transactionHash}`)
+        console.log(`   NFT Token ID: ${result.tokenId}`)
 
-### Key Insights
-1. First major insight with detailed explanation
-2. Second important point with examples
-3. Third crucial element with code samples
+        // ============ STEP 4: 带 payment header 重新请求 ============
+        console.log('📡 Step 4: Fetching content with payment proof...')
+        
+        const unlockedContent = await fetchContentFull(id!, result.transactionHash, address)
+        
+        console.log('✅ Content retrieved successfully!')
+        
+        setContent({
+          ...unlockedContent,
+          transactionHash: result.transactionHash,
+        })
+        setIsUnlocked(true)
 
-### Code Example
-\`\`\`javascript
-// Premium code snippet
-function premiumFeature() {
-  return "This is exclusive content!";
-}
-\`\`\`
-
-### Conclusion
-Thank you for unlocking this content! You now have permanent access via your NFT.
-`,
-        unlocked: true,
-        transactionHash: `0x${Date.now().toString(16)}${'0'.repeat(48)}`,
-      })
-
-      toast({
-        type: 'success',
-        title: 'Content Unlocked! 🎉',
-        message: 'NFT minted to your wallet',
-      })
-    } catch (error) {
-      toast({ type: 'error', title: 'Unlock failed', message: 'Please try again' })
+        toast({
+          type: 'success',
+          title: 'Content Unlocked! 🎉',
+          message: `NFT #${result.tokenId} minted to your wallet`,
+        })
+      }
+    } catch (error: any) {
+      console.error('❌ Unlock failed:', error)
+      
+      // 用户取消交易
+      if (error.code === 'ACTION_REJECTED' || error.code === 4001) {
+        toast({ type: 'error', title: 'Transaction cancelled', message: 'You rejected the transaction' })
+      } 
+      // 余额不足
+      else if (error.message?.includes('insufficient funds')) {
+        toast({ type: 'error', title: 'Insufficient funds', message: `You need more ${CURRENT_NETWORK.currency.symbol}` })
+      }
+      // 其他错误
+      else {
+        toast({ type: 'error', title: 'Unlock failed', message: error.message || 'Please try again' })
+      }
     } finally {
       setIsUnlocking(false)
     }

@@ -47,6 +47,15 @@ export class PaymentService {
   async verifyPayment(params: VerifyPaymentParams): Promise<PaymentVerificationResult> {
     const { paymentData, expectedAmount, contentId, resourceUrl } = params;
 
+    // 链上已验证 - 前端已经验证了链上的 hasUnlocked
+    if (paymentData === 'chain-verified') {
+      this.logger.log(`[CHAIN] User already unlocked content ${contentId} on-chain`);
+      return {
+        success: true,
+        transactionHash: 'on-chain-verified',
+      };
+    }
+
     // Mock 模式 - 用于开发和测试
     if (!process.env.THIRDWEB_SECRET_KEY) {
       this.logger.log(`[MOCK] Verifying payment for content ${contentId}`);
@@ -59,11 +68,11 @@ export class PaymentService {
         };
       }
       
-      // 模拟真实的支付数据格式验证
+      // 接受交易哈希作为支付证明
       if (paymentData && paymentData.startsWith('0x')) {
         return {
           success: true,
-          transactionHash: `0x${Date.now().toString(16)}${'0'.repeat(48)}`,
+          transactionHash: paymentData, // 使用实际交易哈希
         };
       }
 
